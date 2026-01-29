@@ -1,9 +1,9 @@
-name: generator code
+name: Daily LLM Tip to Feishu
 
 on:
   schedule:
     # Cron is in UTC. This runs every day at 09:00 UTC — modify as needed.
-    - cron: '0 8 * * *'
+    - cron: '0 9 * * *'
   workflow_dispatch: {}
 
 jobs:
