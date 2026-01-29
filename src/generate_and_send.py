@@ -165,6 +165,7 @@ def parse_json_from_text(text: str) -> Optional[dict]:
 def format_message(data: dict) -> str:
     title = data.get("title", "").strip()
     description = data.get("description", "").strip()
+    solution = data.get("solution", "").strip()
     code = data.get("code", "").strip()
     source = data.get("source", "").strip()
     parts = []
@@ -172,6 +173,8 @@ def format_message(data: dict) -> str:
         parts.append(f"题目：{title}")
     if description:
         parts.append(f"描述：{description}")
+    if solution:
+        parts.append(f"题解：{solution}")
     if code:
         parts.append(f"code：{code}")
     
