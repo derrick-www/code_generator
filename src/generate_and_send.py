@@ -163,19 +163,18 @@ def parse_json_from_text(text: str) -> Optional[dict]:
 
 
 def format_message(data: dict) -> str:
-    topic = data.get("topic", "").strip()
-    explanation = data.get("explanation", "").strip()
-    example = data.get("example", "").strip()
+    title = data.get("title", "").strip()
+    description = data.get("description", "").strip()
+    code = data.get("code", "").strip()
     source = data.get("source", "").strip()
     parts = []
-    if topic:
-        parts.append(f"主题：{topic}")
-    if explanation:
-        parts.append(f"解释：{explanation}")
-    if example:
-        parts.append(f"举例：{example}")
-    if source:
-        parts.append(f"参考：{source}")
+    if title:
+        parts.append(f"题目：{title}")
+    if description:
+        parts.append(f"描述：{description}")
+    if code:
+        parts.append(f"code：{code}")
+    
     return "\n".join(parts)
 
 
@@ -211,10 +210,18 @@ def main():
     
     text = call_gemini(gemini_key, GEMINI_MODEL, PROMPT_USER, temperature=0.8)
     parsed = parse_json_from_text(text)
+    if parsed:
+        message = format_message(parsed)
+        logging.info("Parsed JSON and formatted message:\n%s", message)
+        send_to_feishu(FEISHU_WEBHOOK, message)
+        return 0
+    else:
+        last_err = f"无法从 LLM 响应中解析出 JSON，响应文本：{(text or '')[:400]}"
+        logging.warning("Attempt %d: %s", attempt + 1, last_err)
 
     logging.debug("LLM raw response: %s", (text or "")[:1000])
 
-    send_to_feishu(FEISHU_WEBHOOK, parsed)
+    # send_to_feishu(FEISHU_WEBHOOK, parsed)
     return 0
    
 
