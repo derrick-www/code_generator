@@ -1,0 +1,36 @@
+name: generator code
+
+on:
+  schedule:
+    # Cron is in UTC. This runs every day at 09:00 UTC — modify as needed.
+    - cron: '0 8 * * *'
+  workflow_dispatch: {}
+
+jobs:
+  generate-and-send:
+    runs-on: ubuntu-latest
+    env:
+      # These are populated from repository Secrets
+      FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      # Optional:
+      # LLM_PROVIDER: ${{ secrets.LLM_PROVIDER }}
+      # LLM_MODEL: ${{ secrets.LLM_MODEL }}
+      # LLM_API_URL: ${{ secrets.LLM_API_URL }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run generate and send
+        run: |
+          python src/generate_and_send.py
