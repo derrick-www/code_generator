@@ -65,14 +65,18 @@ logging.info("LLM_PROVIDER=%s", LLM_PROVIDER)
 
 
 PROMPT_USER = (
-    "请**随机**给出一个关于“大模型（large models）”的知识点。"
+    "请**随机**选择一道力扣算法题，并给出详细的题解。"
     " 返回内容必须是严格的 JSON（不要包含其他文本），格式如下："
-    '{"topic": "...", "explanation": "...", "example": "...", "source": "..."}。'
+    '{"problem_id": "...", "title": "...", "difficulty": "...", "description": "...", "solution": "...", "code": "...", "complexity": "...", "link": "..."}。'
     " 各字段说明：\n"
-    "- topic: 简短的主题标题（不超过 8 个汉字）\n"
-    "- explanation: 简洁解释（2-4 句）\n"
-    "- example: 一个简单示例或类比（1-2 句）\n"
-    "- source: 如果有参考链接或关键词，可放链接或简短来源说明；没有则空字符串\n"
+    "- problem_id: 题目编号（例如：1, 2, 15, 206 等）\n"
+    "- title: 题目名称（中文或英文）\n"
+    "- difficulty: 难度等级（Easy / Medium / Hard）\n"
+    "- description: 题目描述（简要说明题目要求，2-3 句话）\n"
+    "- solution: 解题思路（详细讲解解题方法、算法思想，3-5 句话）\n"
+    "- code: 代码实现（使用 C++ 包含注释）\n"
+    "- complexity: 时间复杂度和空间复杂度分析（例如：时间复杂度 O(n)，空间复杂度 O(1)）\n"
+    "- link: 力扣题目链接（格式：https://leetcode.cn/problems/xxx/ 或 https://leetcode.com/problems/xxx/）\n"
     "请保证输出是单纯的 JSON 对象，且能被标准 JSON 解析。"
 )
 
@@ -120,7 +124,7 @@ def call_gemini(api_key: str, model: str, prompt: str, temperature: float = 0.8)
                 time.sleep(delay)
             
             response = gemini_model.generate_content(
-                SYSTEM_PROMPT,
+                PROMPT_USER,
                 generation_config=generation_config,
                 request_options={"timeout": 120}
             )
