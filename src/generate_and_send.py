@@ -210,11 +210,11 @@ def main():
     last_err = None
     
     text = call_gemini(gemini_key, GEMINI_MODEL, PROMPT_USER, temperature=0.8)
-          
+    parsed = parse_json_from_text(text)
 
     logging.debug("LLM raw response: %s", (text or "")[:1000])
 
-    send_to_feishu(FEISHU_WEBHOOK, text)
+    send_to_feishu(FEISHU_WEBHOOK, parsed)
     return 0
    
 
