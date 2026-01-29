@@ -163,22 +163,87 @@ def parse_json_from_text(text: str) -> Optional[dict]:
 
 
 def format_message(data: dict) -> str:
-    title = data.get("title", "").strip()
-    description = data.get("description", "").strip()
-    solution = data.get("solution", "").strip()
-    code = data.get("code", "").strip()
-    source = data.get("source", "").strip()
-    parts = []
-    if title:
-        parts.append(f"题目：{title}")
-    if description:
-        parts.append(f"描述：{description}")
-    if solution:
-        parts.append(f"题解：{solution}")
-    if code:
-        parts.append(f"code：{code}")
+    message = {
+        "msg_type": "interactive",
+        "card": {
+            "elements": [
+                {
+                    "tag": "div",
+                    "text": {
+                        "content": f"**题目ID:** {data['problem_id']}\n"
+                                  f"**难度:** {data['difficulty']}\n"
+                                  f"**链接:** [点击查看]({data['link']})",
+                        "tag": "lark_md"
+                    }
+                },
+                {
+                    "tag": "hr"
+                },
+                {
+                    "tag": "div",
+                    "text": {
+                        "content": f"**题目描述**\n{data['description']}",
+                        "tag": "lark_md"
+                    }
+                },
+                {
+                    "tag": "div",
+                    "text": {
+                        "content": f"**解题思路**\n{data['solution']}",
+                        "tag": "lark_md"
+                    }
+                },
+                {
+                    "tag": "div",
+                    "text": {
+                        "content": f"**时间复杂度**\n{data['complexity']}",
+                        "tag": "lark_md"
+                    }
+                },
+                {
+                    "tag": "hr"
+                },
+                {
+                    "tag": "div",
+                    "text": {
+                        "content": "**代码实现**",
+                        "tag": "lark_md"
+                    }
+                },
+                {
+                    "tag": "div",
+                    "text": {
+                        "content": f"```cpp\n{data['code']}\n```",
+                        "tag": "lark_md"
+                    }
+                }
+            ],
+            "header": {
+                "template": "wathet",
+                "title": {
+                    "content": f"📝 LeetCode题目：{data['title']}",
+                    "tag": "plain_text"
+                }
+            }
+        }
+    }
+    return message
+    # title = data.get("title", "").strip()
+    # description = data.get("description", "").strip()
+    # solution = data.get("solution", "").strip()
+    # code = data.get("code", "").strip()
+    # source = data.get("source", "").strip()
+    # parts = []
+    # if title:
+    #     parts.append(f"题目：{title}")
+    # if description:
+    #     parts.append(f"描述：{description}")
+    # if solution:
+    #     parts.append(f"题解：{solution}")
+    # if code:
+    #     parts.append(f"code：{code}")
     
-    return "\n".join(parts)
+    # return "\n".join(parts)
 
 
 def send_to_feishu(webhook: str, text: str) -> None:
@@ -187,7 +252,9 @@ def send_to_feishu(webhook: str, text: str) -> None:
     headers = {"Content-Type": "application/json; charset=utf-8"}
     payload = {"msg_type": "text", "content": {"text": text}}
     logging.info("Sending message to Feishu webhook")
-    r = requests.post(webhook, headers=headers, json=payload, timeout=REQUEST_TIMEOUT)
+    # r = requests.post(webhook, headers=headers, json=payload, timeout=REQUEST_TIMEOUT)
+    r = requests.post(webhook, headers={"Content-Type": "application/json"},
+            data=json.dumps(message)
     try:
         r.raise_for_status()
     except Exception as e:
