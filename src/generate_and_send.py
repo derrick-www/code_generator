@@ -1,0 +1,220 @@
+#!/usr/bin/env python3
+"""
+generate_and_send.py (支持 Gemini via google-genai, OpenAI, 或通用 generic HTTP endpoints)
+
+环境变量（主要）:
+- FEISHU_WEBHOOK: 飞书自定义机器人 Webhook（必填）
+- LLM_PROVIDER: "openai" / "gemini" / "generic"（若未设置，会基于其他变量自动推断）
+- LLM_API_KEY: 用于 openai 或 generic (Bearer) 的 key / token
+- LLM_API_URL: generic provider 的 endpoint（当 LLM_PROVIDER=generic 时需要）
+- GEMINI_API_KEY: 若使用 google-genai 的 API key（可选，优先于 LLM_API_KEY）
+- GEMINI_MODEL: 要调用的 Gemini 模型（可选，默认 "gemini-1.5"）
+"""
+from __future__ import annotations
+import os
+import json
+import time
+import logging
+from typing import Optional
+
+import requests
+from dotenv import load_dotenv
+
+# Try OpenAI new/old clients
+HAS_OPENAI_V1 = False
+HAS_OPENAI_OLD = False
+try:
+    from openai import OpenAI  # new client
+    HAS_OPENAI_V1 = True
+except Exception:
+    try:
+        import openai  # legacy
+        HAS_OPENAI_OLD = True
+    except Exception:
+        pass
+
+# Try google-genai client availability will be checked at runtime in call_gemini
+load_dotenv()
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+# Environment / config
+FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK")
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "").strip().lower() or None
+LLM_API_KEY = os.getenv("LLM_API_KEY")
+LLM_API_URL = os.getenv("LLM_API_URL")
+# Gemini-specific vars (prefer these if present)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", os.getenv("LLM_MODEL", "gemini-1.5"))
+REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "30"))
+
+# If LLM_API_URL is set but provider is openai or empty, auto-switch to generic
+if LLM_API_URL and (LLM_PROVIDER in (None, "", "openai")):
+    logging.info("Detected LLM_API_URL is set; forcing LLM_PROVIDER='generic'")
+    LLM_PROVIDER = "generic"
+
+# If GEMINI_API_KEY present and provider not set, use gemini
+if GEMINI_API_KEY and not LLM_PROVIDER:
+    logging.info("Detected GEMINI_API_KEY; setting LLM_PROVIDER='gemini'")
+    LLM_PROVIDER = "gemini"
+
+# Default provider fallback
+if not LLM_PROVIDER:
+    LLM_PROVIDER = "openai"  # keep backward compatibility
+logging.info("LLM_PROVIDER=%s", LLM_PROVIDER)
+
+
+PROMPT_USER = (
+    "请**随机**给出一个关于“大模型（large models）”的知识点。"
+    " 返回内容必须是严格的 JSON（不要包含其他文本），格式如下："
+    '{"topic": "...", "explanation": "...", "example": "...", "source": "..."}。'
+    " 各字段说明：\n"
+    "- topic: 简短的主题标题（不超过 8 个汉字）\n"
+    "- explanation: 简洁解释（2-4 句）\n"
+    "- example: 一个简单示例或类比（1-2 句）\n"
+    "- source: 如果有参考链接或关键词，可放链接或简短来源说明；没有则空字符串\n"
+    "请保证输出是单纯的 JSON 对象，且能被标准 JSON 解析。"
+)
+
+
+# ------------------------------
+# Gemini (google-genai) 调用
+# ------------------------------
+def call_gemini(api_key: str, model: str, prompt: str, temperature: float = 0.8) -> str:
+    """
+    使用 google-genai 客户端调用 Gemini（参考 daily_stock_analysis 中的做法）。
+    - api_key: google genai API key（通常以 'AIza...' 或其他形式）
+    - model: 模型名（如 gemini-1.5 / gemini-2.5 等）
+    返回字符串（LLM 的原始文本）
+    """
+    try:
+        # from google import genai
+        import google.generativeai as genai
+    except Exception as e:
+        raise RuntimeError(
+            "google-genai not installed. Install with: pip install google-genai\n" f"orig: {e}"
+        )
+
+    try:
+        SYSTEM_PROMPT = """你是一位大模型专家，精通大模型面试题，随机给出一个大模型面试题，并给出详细的答案。"""
+        logging.info("Calling Gemini via google-genai (model=%s)", model)
+        
+        genai.configure(api_key=api_key)
+        model_name = "gemini-3-flash-preview"
+        gemini_model = genai.GenerativeModel(
+                    model_name=model_name
+                )
+        max_retries = 3
+        base_delay = 5.0
+        generation_config = {
+            "temperature": 0.7,
+            "max_output_tokens": 8192,
+        }
+        for attempt in range(max_retries):
+        
+            # 请求前增加延时（防止请求过快触发限流）
+            if attempt > 0:
+                delay = base_delay * (2 ** (attempt - 1))  # 指数退避: 5, 10, 20, 40...
+                delay = min(delay, 60)  # 最大60秒
+                logger.info(f"[Gemini] 第 {attempt + 1} 次重试，等待 {delay:.1f} 秒...")
+                time.sleep(delay)
+            
+            response = gemini_model.generate_content(
+                SYSTEM_PROMPT,
+                generation_config=generation_config,
+                request_options={"timeout": 120}
+            )
+            
+            if response and response.text:
+                return response.text
+            else:
+                raise RuntimeError(f"Gemini 请求失败: {response.text}")
+        
+    except Exception as e:
+        # rethrow with context
+        raise RuntimeError(f"Gemini call failed: {e}")
+
+# ------------------------------
+# 辅助函数：解析 / 格式化 / 发送到飞书
+# ------------------------------
+def parse_json_from_text(text: str) -> Optional[dict]:
+    if not text:
+        return None
+    try:
+        obj = json.loads(text)
+        if isinstance(obj, dict):
+            return obj
+    except Exception:
+        pass
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        try:
+            obj = json.loads(text[start:end + 1])
+            if isinstance(obj, dict):
+                return obj
+        except Exception:
+            pass
+    return None
+
+
+def format_message(data: dict) -> str:
+    topic = data.get("topic", "").strip()
+    explanation = data.get("explanation", "").strip()
+    example = data.get("example", "").strip()
+    source = data.get("source", "").strip()
+    parts = []
+    if topic:
+        parts.append(f"主题：{topic}")
+    if explanation:
+        parts.append(f"解释：{explanation}")
+    if example:
+        parts.append(f"举例：{example}")
+    if source:
+        parts.append(f"参考：{source}")
+    return "\n".join(parts)
+
+
+def send_to_feishu(webhook: str, text: str) -> None:
+    if not webhook:
+        raise RuntimeError("FEISHU_WEBHOOK is not set.")
+    headers = {"Content-Type": "application/json; charset=utf-8"}
+    payload = {"msg_type": "text", "content": {"text": text}}
+    logging.info("Sending message to Feishu webhook")
+    r = requests.post(webhook, headers=headers, json=payload, timeout=REQUEST_TIMEOUT)
+    try:
+        r.raise_for_status()
+    except Exception as e:
+        logging.error("Feishu webhook returned status %s: %s", r.status_code, r.text)
+        raise
+    logging.info("Message sent to Feishu successfully.")
+
+
+# ------------------------------
+# 主流程
+# ------------------------------
+def main():
+    if not FEISHU_WEBHOOK:
+        logging.error("FEISHU_WEBHOOK 环境变量未设置，退出。")
+        return 2
+
+    # Determine which credentials to use
+    # Priority for Gemini: GEMINI_API_KEY -> LLM_API_KEY
+    gemini_key = LLM_API_KEY
+
+    text = None
+    last_err = None
+    
+    text = call_gemini(gemini_key, GEMINI_MODEL, PROMPT_USER, temperature=0.8)
+          
+
+    logging.debug("LLM raw response: %s", (text or "")[:1000])
+
+    send_to_feishu(FEISHU_WEBHOOK, text)
+    return 0
+   
+
+   
+
+if __name__ == "__main__":
+    raise SystemExit(main())
